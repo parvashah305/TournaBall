@@ -53,6 +53,19 @@ const scoreSchema = new mongoose.Schema({
     sixes: { type: Number, default: 0 },
     isOnStrike: { type: Boolean, default: false }
   }],
+  allBatsmen: [{
+    player: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Player'
+    },
+    runs: { type: Number, default: 0 },
+    balls: { type: Number, default: 0 },
+    fours: { type: Number, default: 0 },
+    sixes: { type: Number, default: 0 },
+    isOut: { type: Boolean, default: false },
+    howOut: { type: String },
+    isOnStrike: { type: Boolean, default: false }
+  }],
   currentBowler: {
     player: {
       type: mongoose.Schema.Types.ObjectId,
@@ -62,6 +75,17 @@ const scoreSchema = new mongoose.Schema({
     runs: { type: Number, default: 0 },
     wickets: { type: Number, default: 0 }
   },
+  allBowlers: [{
+    player: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Player'
+    },
+    overs: { type: Number, default: 0 },
+    balls: { type: Number, default: 0 },
+    runs: { type: Number, default: 0 },
+    wickets: { type: Number, default: 0 },
+    maidens: { type: Number, default: 0 }
+  }],
   ballByBall: [{
     over: Number,
     ball: Number,

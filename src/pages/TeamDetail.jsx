@@ -26,8 +26,8 @@ const TeamDetail = () => {
     try {
       setLoading(true);
       const [teamRes, playersRes] = await Promise.all([
-        axios.get(`teams/${id}`),
-        axios.get(`players/team/${id}`)
+        axios.get(`/api/teams/${id}`),
+        axios.get(`/api/players/team/${id}`)
       ]);
 
       setTeam(teamRes.data);
@@ -42,7 +42,7 @@ const TeamDetail = () => {
   const handleAddPlayer = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post('players', {
+      const response = await axios.post('/api/players', {
         name: playerForm.name,
         team: id,
         role: playerForm.role,

@@ -12,14 +12,18 @@ import {
   Zap,
   Clock,
   TrendingUp,
-  BarChart3
+  BarChart3,
+  Lock
 } from 'lucide-react';
 import axios from 'axios';
 import io from 'socket.io-client';
+import { useAuth } from '../contexts/AuthContext';
 
 const LiveScoring = () => {
   const { matchId } = useParams();
+  const { user } = useAuth();
   const [match, setMatch] = useState(null);
+  const [tournament, setTournament] = useState(null);
   const [teams, setTeams] = useState({ team1: null, team2: null });
   const [players, setPlayers] = useState({ team1: [], team2: [] });
   const [currentInnings, setCurrentInnings] = useState(1);
@@ -39,6 +43,21 @@ const LiveScoring = () => {
   const [showTossModal, setShowTossModal] = useState(false);
   const [tossWinner, setTossWinner] = useState('');
   const [tossDecision, setTossDecision] = useState('bat');
+  const [showBowlerModal, setShowBowlerModal] = useState(false);
+  const [showNewBatsmanModal, setShowNewBatsmanModal] = useState(false);
+  const [extraType, setExtraType] = useState('wides');
+  const [extraRuns, setExtraRuns] = useState(1);
+  const [pendingWicket, setPendingWicket] = useState(null);
+
+  // Check if current user is tournament owner
+  const isTournamentOwner = useMemo(() => {
+    if (!tournament || !user) return false;
+    const organizerId = typeof tournament.organizer === 'object'
+      ? tournament.organizer._id
+      : tournament.organizer;
+    const result = organizerId === user._id;
+    return result;
+  }, [tournament, user]);
 
   useEffect(() => {
     fetchMatchData();
@@ -79,23 +98,40 @@ const LiveScoring = () => {
   const fetchMatchData = async () => {
     try {
       setLoading(true);
-      const matchRes = await axios.get(`matches/${matchId}`);
+      const matchRes = await axios.get(`/api/matches/${matchId}`);
       const { match: matchData, scores } = matchRes.data;
       setMatch(matchData);
       setMatchStatus(matchData.status);
 
+      // Fetch tournament data to check ownership
+      if (matchData.tournament) {
+        const tournamentId = typeof matchData.tournament === 'object' 
+          ? matchData.tournament._id 
+          : matchData.tournament;
+        
+        try {
+          const tournamentRes = await axios.get(`/api/tournaments/${tournamentId}`);
+          setTournament(tournamentRes.data);
+        } catch (error) {
+          console.error('Error fetching tournament:', error);
+        }
+      }
+
+      // Helper to get team ID whether it's a string or object
+      const getTeamId = (team) => typeof team === 'string' ? team : team?._id;
+
       // Fetch team data
       const [team1Res, team2Res] = await Promise.all([
-        axios.get(`teams/${matchData.teamA}`),
-        axios.get(`teams/${matchData.teamB}`)
+        axios.get(`/api/teams/${getTeamId(matchData.teamA)}`),
+        axios.get(`/api/teams/${getTeamId(matchData.teamB)}`)
       ]);
 
       setTeams({ team1: team1Res.data, team2: team2Res.data });
 
       // Fetch players for both teams
       const [team1Players, team2Players] = await Promise.all([
-        axios.get(`players/team/${matchData.teamA}`),
-        axios.get(`players/team/${matchData.teamB}`)
+        axios.get(`/api/players/team/${getTeamId(matchData.teamA)}`),
+        axios.get(`/api/players/team/${getTeamId(matchData.teamB)}`)
       ]);
 
       setPlayers({ team1: team1Players.data, team2: team2Players.data });
@@ -147,7 +183,7 @@ const LiveScoring = () => {
     
     try {
       const tossData = { winner: tossWinner, decision: tossDecision };
-      await axios.patch(`matches/${matchId}`, { toss: tossData });
+      await axios.patch(`/api/matches/${matchId}`, { toss: tossData });
 
       // Update local state immediately
       setMatch(prev => ({ ...prev, toss: tossData }));
@@ -168,7 +204,7 @@ const LiveScoring = () => {
       return;
     }
     try {
-      await axios.patch(`matches/${matchId}`, { status: 'live' });
+      await axios.patch(`/api/matches/${matchId}`, { status: 'live' });
       setMatchStatus('live');
       setShowPlayerSelection(true);
       socket.emit('match-started', matchId);
@@ -187,64 +223,239 @@ const LiveScoring = () => {
   };
 
   const recordBall = async (runs, extras = null, wicket = null) => {
-    const ballData = {
+    let legalDelivery = true;
+    let rotateStrike = false;
+    let newScore = { ...score };
+    let newExtras = { ...extras };
+    let newBallHistory = [...ballHistory];
+    let newStriker = striker;
+    let newNonStriker = nonStriker;
+    let newBowler = bowler;
+
+    // Handle extras
+    if (extras) {
+      legalDelivery = extras.type === 'byes' || extras.type === 'legByes'; // Byes/legbyes are legal, others not
+      newExtras[extras.type] += extras.runs;
+      newScore.runs += extras.runs;
+      if (extras.type === 'wides' || extras.type === 'noBalls') {
+        legalDelivery = false;
+      }
+    } else {
+      newScore.runs += runs;
+      if (striker.isOnStrike) {
+        newStriker = {
+          ...striker,
+          runs: (striker.runs || 0) + runs,
+          balls: (striker.balls || 0) + 1,
+          fours: (striker.fours || 0) + (runs === 4 ? 1 : 0),
+          sixes: (striker.sixes || 0) + (runs === 6 ? 1 : 0)
+        };
+      } else {
+        newNonStriker = {
+          ...nonStriker,
+          runs: (nonStriker.runs || 0) + runs,
+          balls: (nonStriker.balls || 0) + 1,
+          fours: (nonStriker.fours || 0) + (runs === 4 ? 1 : 0),
+          sixes: (nonStriker.sixes || 0) + (runs === 6 ? 1 : 0)
+        };
+      }
+      if (runs % 2 === 1) rotateStrike = true;
+    }
+
+    // Update bowler stats
+    if (!extras || extras.type === 'byes' || extras.type === 'legByes') {
+      newBowler = {
+        ...bowler,
+        balls: (bowler.balls || 0) + 1,
+        overs: Math.floor(((bowler.balls || 0) + 1) / 6),
+        runs: (bowler.runs || 0) + (runs || 0),
+        wickets: (bowler.wickets || 0) + (wicket ? 1 : 0)
+      };
+    } else {
+      newBowler = {
+        ...bowler,
+        runs: (bowler.runs || 0) + (extras.runs || 0)
+      };
+    }
+
+    // Update score/balls/overs
+    if (legalDelivery) {
+      newScore.balls += 1;
+      if (newScore.balls % 6 === 0) {
+        newScore.overs += 1;
+        newScore.balls = 0;
+      }
+    }
+
+    // Add to ball history
+    newBallHistory.push({
       runs,
       extras,
       wicket,
       striker: striker.name,
       bowler: bowler.name,
-      over: Math.floor(score.balls / 6) + 1,
-      ball: (score.balls % 6) + 1,
+      over: newScore.overs + (legalDelivery && newScore.balls === 0 ? 1 : 0),
+      ball: legalDelivery ? (newScore.balls === 0 ? 6 : newScore.balls) : newScore.balls + 1,
       timestamp: new Date()
-    };
+    });
 
-    const newScore = { ...score };
-    const newExtras = { ...extras };
-
-    // Update score
-    if (extras) {
-      newExtras[extras.type] += extras.runs;
-      newScore.runs += extras.runs;
-    } else {
-      newScore.runs += runs;
-    }
-
+    // Handle wicket
     if (wicket) {
       newScore.wickets += 1;
+      
+      // Mark batsman as out in backend
+      try {
+        await axios.post('/api/scores/wicket', {
+          matchId,
+          innings: currentInnings,
+          batsmanId: striker._id,
+          howOut: wicket.type
+        });
+      } catch (error) {
+        console.error('Error updating wicket:', error);
+      }
+      
+      const available = getAvailableBatsmen();
+      if (available.length > 0) {
+        setPendingWicket({ outPlayer: striker, reason: wicket.type });
+        setShowNewBatsmanModal(true);
+      } else {
+        // Last pair, no selection, just continue
+        setPendingWicket(null);
+        setShowNewBatsmanModal(false);
+      }
     }
 
-    newScore.balls += 1;
-    if (newScore.balls % 6 === 0) {
-      newScore.overs += 1;
-      newScore.balls = 0;
+    // Handle strike rotation
+    if (rotateStrike) {
+      [newStriker, newNonStriker] = [newNonStriker, newStriker];
+    }
+    // End of over: rotate strike and prompt for new bowler
+    if (legalDelivery && newScore.balls === 0) {
+      [newStriker, newNonStriker] = [newNonStriker, newStriker];
+      setShowBowlerModal(true);
     }
 
-    const updatedBallHistory = [...ballHistory, ballData];
+    // Save state
+    setScore(newScore);
+    setExtras(newExtras);
+    setBallHistory(newBallHistory);
+    setStriker(newStriker);
+    setNonStriker(newNonStriker);
+    setBowler(newBowler);
 
+    // Persist batsman and bowler stats to backend
     try {
-      await axios.patch(`matches/${matchId}`, {
+      await axios.post('/api/scores', {
+        matchId,
+        innings: currentInnings,
+        battingTeam: battingTeam?._id,
+        bowlingTeam: bowlingTeam?._id,
+        runs: newScore.runs,
+        wickets: newScore.wickets,
+        overs: newScore.overs,
+        balls: newScore.balls,
+        extras: newExtras,
+        currentBatsmen: [
+          {
+            player: newStriker?._id,
+            runs: newStriker?.runs || 0,
+            balls: newStriker?.balls || 0,
+            fours: newStriker?.fours || 0,
+            sixes: newStriker?.sixes || 0,
+            isOnStrike: true
+          },
+          {
+            player: newNonStriker?._id,
+            runs: newNonStriker?.runs || 0,
+            balls: newNonStriker?.balls || 0,
+            fours: newNonStriker?.fours || 0,
+            sixes: newNonStriker?.sixes || 0,
+            isOnStrike: false
+          }
+        ],
+        currentBowler: {
+          player: newBowler?._id,
+          overs: Math.floor((newBowler?.balls || 0) / 6),
+          balls: newBowler?.balls || 0,
+          runs: newBowler?.runs || 0,
+          wickets: newBowler?.wickets || 0
+        },
+        ballByBall: newBallHistory.map(b => ({
+          over: b.over,
+          ball: b.ball,
+          runs: b.runs,
+          extras: b.extras?.type,
+          wicket: b.wicket,
+          striker: b.striker,
+          bowler: b.bowler
+        }))
+      });
+    } catch (err) {
+      console.error('Error updating player stats:', err);
+    }
+
+    // Emit to backend/socket
+    try {
+      await axios.patch(`/api/matches/${matchId}`, {
         score: newScore,
         extras: newExtras,
-        ballHistory: updatedBallHistory
+        ballHistory: newBallHistory
       });
-
-      setScore(newScore);
-      setExtras(newExtras);
-      setBallHistory(updatedBallHistory);
-
-      // Emit to socket for real-time updates
       socket.emit('score-update', {
         matchId,
         score: newScore,
-        ballHistory: updatedBallHistory
+        ballHistory: newBallHistory
       });
-
-      // Check if innings is complete
-      if (newScore.wickets >= 10 || newScore.overs >= 20) {
-        endInnings();
-      }
     } catch (error) {
       console.error('Error recording ball:', error);
+    }
+
+    // Check for match/innings end
+    const target = match?.target;
+    const maxOvers = match?.overs || 20;
+    
+    if (
+      (currentInnings === 2 && target && newScore.runs >= target) ||
+      newScore.wickets >= battingTeamPlayers.length - 1 ||
+      (newScore.overs >= maxOvers && newScore.balls === 0)
+    ) {
+      if (currentInnings === 2) {
+        // End match
+        let winner, margin, method;
+        if (target && newScore.runs >= target) {
+          winner = battingTeam._id;
+          margin = `${battingTeam.name} won by ${battingTeamPlayers.length - 1 - newScore.wickets} wickets`;
+          method = 'chased';
+        } else if (newScore.wickets >= battingTeamPlayers.length - 1) {
+          winner = bowlingTeam._id;
+          margin = `${bowlingTeam.name} won by ${target - newScore.runs} runs`;
+          method = 'all out';
+        } else {
+          winner = bowlingTeam._id;
+          margin = `${bowlingTeam.name} won by ${target - newScore.runs} runs`;
+          method = 'overs up';
+        }
+        
+        await axios.patch(`/api/matches/${matchId}`, { status: 'completed', result: { winner, margin, method } });
+        setMatchStatus('completed');
+        socket.emit('match-completed', matchId);
+        return;
+      } else {
+        // End of first innings, start second innings
+        await endInnings();
+        return;
+      }
+    }
+
+    // Check if match should end
+    if (currentInnings === 2 && currentBall === 6 && currentOver === 19) {
+      const winner = scores.team1 > scores.team2 ? match.team1 : match.team2;
+      const margin = Math.abs(scores.team1 - scores.team2);
+      const method = 'Runs';
+      
+      // End the match
+      await handleMatchEnd(winner, margin, method);
     }
   };
 
@@ -252,7 +463,10 @@ const LiveScoring = () => {
     if (currentInnings === 1) {
       // End of 1st innings, set target for 2nd
       try {
-        await axios.patch(`matches/${matchId}`, { target: score.runs + 1 });
+        const target = score.runs + 1;
+        await axios.patch(`/api/matches/${matchId}`, { target });
+        setMatch(prev => ({ ...prev, target }));
+        console.log('Set target for 2nd innings:', target);
       } catch (error) {
         console.error('Error setting target:', error);
       }
@@ -271,7 +485,7 @@ const LiveScoring = () => {
         margin: 'TBD'
       };
       try {
-        await axios.patch(`matches/${matchId}`, { status: 'completed', result });
+        await axios.patch(`/api/matches/${matchId}`, { status: 'completed', result });
         setMatchStatus('completed');
         socket.emit('match-completed', matchId);
       } catch (error) {
@@ -308,6 +522,14 @@ const LiveScoring = () => {
     if (!bowlingTeam || !teams.team1 || !teams.team2) return [];
     return bowlingTeam._id === teams.team1._id ? players.team1 : players.team2;
   }, [bowlingTeam, players, teams]);
+
+  // Helper to get available batsmen (not out and not currently batting)
+  const getAvailableBatsmen = () => {
+    const all = battingTeamPlayers;
+    const outIds = ballHistory.filter(b => b.wicket && b.striker).map(b => b.strikerId);
+    const currentIds = [striker?._id, nonStriker?._id].filter(Boolean);
+    return all.filter(p => !outIds.includes(p._id) && !currentIds.includes(p._id));
+  };
 
   if (loading) {
     return (
@@ -358,50 +580,91 @@ const LiveScoring = () => {
             </p>
           </div>
 
-          {/* Score Display */}
+          {/* Total Score Display (for all users) */}
           {matchStatus === 'live' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <div className="bg-green-50 rounded-lg p-4">
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold text-green-800 mb-2">
-                    {battingTeam?.name}
-                  </h3>
-                  <div className="text-3xl font-bold text-green-900">
-                    {score.runs}/{score.wickets}
+            <div className="mb-6">
+              <div className="bg-gradient-to-r from-blue-50 to-green-50 border border-blue-200 rounded-lg p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-4 text-center">Live Score</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="text-center">
+                    <h4 className="text-lg font-semibold text-blue-800 mb-2">{battingTeam?.name}</h4>
+                    <div className="text-4xl font-bold text-blue-900 mb-2">
+                      {score.runs}/{score.wickets}
+                    </div>
+                    <div className="text-sm text-blue-700">
+                      {formatOvers(score.overs, score.balls)} overs • RR: {getRunRate()}
+                    </div>
+                    <div className="text-xs text-blue-600 mt-1">
+                      Extras: {Object.values(extras).reduce((a, b) => a + b, 0)} 
+                      (W: {extras.wides} NB: {extras.noBalls} B: {extras.byes} LB: {extras.legByes})
+                    </div>
                   </div>
-                  <div className="text-sm text-green-700">
-                    {formatOvers(score.overs, score.balls)} overs
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 rounded-lg p-4">
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold text-blue-800 mb-2">Run Rate</h3>
-                  <div className="text-3xl font-bold text-blue-900">
-                    {getRunRate()}
-                  </div>
-                  <div className="text-sm text-blue-700">runs per over</div>
-                </div>
-              </div>
-
-              <div className="bg-purple-50 rounded-lg p-4">
-                <div className="text-center">
-                  <h3 className="text-lg font-semibold text-purple-800 mb-2">Innings</h3>
-                  <div className="text-3xl font-bold text-purple-900">
-                    {currentInnings}/2
-                  </div>
-                  <div className="text-sm text-purple-700">
-                    {currentInnings === 1 ? '1st Innings' : '2nd Innings'}
+                  <div className="text-center">
+                    <h4 className="text-lg font-semibold text-green-800 mb-2">Current Innings</h4>
+                    <div className="text-3xl font-bold text-green-900 mb-2">
+                      {currentInnings}/2
+                    </div>
+                    <div className="text-sm text-green-700">
+                      {currentInnings === 1 ? '1st Innings' : '2nd Innings'}
+                    </div>
+                    {currentInnings === 2 && match.target && (
+                      <div className="text-sm text-yellow-700 mt-2">
+                        Target: {match.target} • Need: {match.target - score.runs}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Action Buttons */}
+          {/* Target Display for 2nd Innings */}
+          {matchStatus === 'live' && currentInnings === 2 && match.target && (
+            <div className="mb-6">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+                <h3 className="text-lg font-semibold text-yellow-800 mb-2">Target</h3>
+                <div className="text-2xl font-bold text-yellow-900">
+                  {match.target} runs in {match.overs} overs
+                </div>
+                <div className="text-sm text-yellow-700 mt-2">
+                  {score.runs >= match.target ? 'Target Achieved!' : 
+                   `Need ${match.target - score.runs} more runs from ${match.overs - score.overs - (score.balls / 6)} overs`}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Match Result Display */}
+          {matchStatus === 'completed' && match.result && (
+            <div className="mb-6">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+                <Trophy className="mx-auto h-12 w-12 text-green-600 mb-4" />
+                <h3 className="text-2xl font-bold text-green-800 mb-2">Match Result</h3>
+                <div className="text-xl font-semibold text-green-900 mb-2">
+                  {teams.team1 && teams.team2 && (
+                    match.result.winner === teams.team1._id ? teams.team1.name : teams.team2.name
+                  )} won!
+                </div>
+                <div className="text-lg text-green-700 mb-2">
+                  {match.result.margin}
+                </div>
+                <div className="text-sm text-green-600">
+                  Method: {match.result.method}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons - Owner Only */}
           <div className="flex justify-center space-x-4">
-            {matchStatus === 'scheduled' && !match.toss?.winner && (
+            {!isTournamentOwner && matchStatus !== 'completed' && (
+              <div className="flex items-center px-6 py-3 bg-gray-100 text-gray-600 rounded-lg">
+                <Lock className="h-5 w-5 mr-2" />
+                Only tournament owner can control scoring
+              </div>
+            )}
+            
+            {isTournamentOwner && matchStatus === 'scheduled' && !match.toss?.winner && (
               <button
                 onClick={() => setShowTossModal(true)}
                 className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -410,7 +673,8 @@ const LiveScoring = () => {
                 Conduct Toss
               </button>
             )}
-            {matchStatus === 'scheduled' && match.toss?.winner && (
+            
+            {isTournamentOwner && matchStatus === 'scheduled' && match.toss?.winner && (
               <button
                 onClick={startMatch}
                 className="flex items-center px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -420,7 +684,7 @@ const LiveScoring = () => {
               </button>
             )}
 
-            {matchStatus === 'live' && (
+            {isTournamentOwner && matchStatus === 'live' && (
               <>
                 <button
                   onClick={() => setShowPlayerSelection(true)}
@@ -442,8 +706,8 @@ const LiveScoring = () => {
         </div>
       </div>
 
-      {/* Scoring Panel */}
-      {showScoringPanel && matchStatus === 'live' && (
+      {/* Scoring Panel - Owner Only */}
+      {isTournamentOwner && showScoringPanel && matchStatus === 'live' && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Live Scoring</h2>
@@ -456,6 +720,9 @@ const LiveScoring = () => {
                   <span className="text-lg">{getPlayerRoleIcon(striker?.role)}</span>
                   <span className="font-semibold">{striker?.name || 'Not selected'}</span>
                 </div>
+                <div className="text-sm text-gray-600 mt-2">
+                  Runs: {striker?.runs || 0} | Balls: {striker?.balls || 0} | 4s: {striker?.fours || 0} | 6s: {striker?.sixes || 0}
+                </div>
               </div>
               <div className="bg-gray-50 rounded-lg p-4">
                 <h3 className="font-medium text-gray-900 mb-2">Non-Striker</h3>
@@ -463,12 +730,18 @@ const LiveScoring = () => {
                   <span className="text-lg">{getPlayerRoleIcon(nonStriker?.role)}</span>
                   <span className="font-semibold">{nonStriker?.name || 'Not selected'}</span>
                 </div>
+                <div className="text-sm text-gray-600 mt-2">
+                  Runs: {nonStriker?.runs || 0} | Balls: {nonStriker?.balls || 0} | 4s: {nonStriker?.fours || 0} | 6s: {nonStriker?.sixes || 0}
+                </div>
               </div>
               <div className="bg-gray-50 rounded-lg p-4">
                 <h3 className="font-medium text-gray-900 mb-2">Bowler</h3>
                 <div className="flex items-center space-x-2">
                   <span className="text-lg">{getPlayerRoleIcon(bowler?.role)}</span>
                   <span className="font-semibold">{bowler?.name || 'Not selected'}</span>
+                </div>
+                <div className="text-sm text-gray-600 mt-2">
+                  Overs: {bowler?.overs || 0} | Balls: {bowler?.balls || 0} | Runs: {bowler?.runs || 0} | Wickets: {bowler?.wickets || 0}
                 </div>
               </div>
             </div>
@@ -492,30 +765,30 @@ const LiveScoring = () => {
 
               <div>
                 <h3 className="font-medium text-gray-900 mb-3">Extras</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <button
-                    onClick={() => recordBall(0, { type: 'wides', runs: 1 })}
-                    className="px-4 py-2 bg-yellow-100 text-yellow-800 rounded-md hover:bg-yellow-200 transition-colors"
+                <div className="flex flex-col md:flex-row md:items-center gap-2">
+                  <select
+                    value={extraType}
+                    onChange={e => setExtraType(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
                   >
-                    Wide (+1)
-                  </button>
+                    <option value="wides">Wide</option>
+                    <option value="noBalls">No Ball</option>
+                    <option value="byes">Byes</option>
+                    <option value="legByes">Leg Byes</option>
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    value={extraRuns}
+                    onChange={e => setExtraRuns(Number(e.target.value))}
+                    className="w-24 p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                    placeholder="Runs"
+                  />
                   <button
-                    onClick={() => recordBall(0, { type: 'noBalls', runs: 1 })}
-                    className="px-4 py-2 bg-red-100 text-red-800 rounded-md hover:bg-red-200 transition-colors"
+                    onClick={() => recordBall(0, { type: extraType, runs: extraRuns })}
+                    className="px-4 py-2 bg-yellow-100 text-yellow-800 rounded-md hover:bg-yellow-200 transition-colors font-medium"
                   >
-                    No Ball (+1)
-                  </button>
-                  <button
-                    onClick={() => recordBall(0, { type: 'byes', runs: 1 })}
-                    className="px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 transition-colors"
-                  >
-                    Byes (+1)
-                  </button>
-                  <button
-                    onClick={() => recordBall(0, { type: 'legByes', runs: 1 })}
-                    className="px-4 py-2 bg-purple-100 text-purple-800 rounded-md hover:bg-purple-200 transition-colors"
-                  >
-                    Leg Byes (+1)
+                    Add Extra
                   </button>
                 </div>
               </div>
@@ -542,7 +815,7 @@ const LiveScoring = () => {
                     LBW
                   </button>
                   <button
-                    onClick={() => recordBall(0, null, { type: 'runout' })}
+                    onClick={() => recordBall(0, null, { type: 'run out' })}
                     className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
                   >
                     Run Out
@@ -550,6 +823,19 @@ const LiveScoring = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Only Message for Non-Owners */}
+      {!isTournamentOwner && matchStatus === 'live' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
+            <Lock className="mx-auto h-12 w-12 text-blue-600 mb-4" />
+            <h3 className="text-lg font-semibold text-blue-800 mb-2">View Only Mode</h3>
+            <p className="text-blue-700">
+              You can view the live score and match progress. Only the tournament owner can control scoring.
+            </p>
           </div>
         </div>
       )}
@@ -724,6 +1010,96 @@ const LiveScoring = () => {
               </button>
               <button
                 onClick={() => setShowTossModal(false)}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bowler Selection Modal */}
+      {showBowlerModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Select New Bowler</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Bowler</label>
+                <select
+                  value={bowler?._id || ''}
+                  onChange={(e) => {
+                    const player = bowlingTeamPlayers.find(p => p._id === e.target.value);
+                    setBowler(player);
+                  }}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                >
+                  <option value="">Select Bowler</option>
+                  {bowlingTeamPlayers.map((player) => (
+                    <option key={player._id} value={player._id}>
+                      {player.name} ({player.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex space-x-4 pt-6">
+              <button
+                onClick={() => setShowBowlerModal(false)}
+                className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
+              >
+                Confirm Selection
+              </button>
+              <button
+                onClick={() => setShowBowlerModal(false)}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Batsman Selection Modal */}
+      {showNewBatsmanModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Select New Batsman</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Batsman</label>
+                <select
+                  value={striker?._id || ''}
+                  onChange={(e) => {
+                    const player = battingTeamPlayers.find(p => p._id === e.target.value);
+                    setStriker(player);
+                  }}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                >
+                  <option value="">Select Batsman</option>
+                  {battingTeamPlayers.map((player) => (
+                    <option key={player._id} value={player._id}>
+                      {player.name} ({player.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex space-x-4 pt-6">
+              <button
+                onClick={() => setShowNewBatsmanModal(false)}
+                className="flex-1 bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition-colors"
+              >
+                Confirm Selection
+              </button>
+              <button
+                onClick={() => setShowNewBatsmanModal(false)}
                 className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 transition-colors"
               >
                 Cancel

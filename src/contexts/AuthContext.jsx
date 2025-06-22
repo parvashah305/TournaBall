@@ -3,10 +3,8 @@ import axios from 'axios';
 
 const AuthContext = createContext();
 
-const API_URL = 'http://localhost:3000/api';
-
-// Configure axios defaults
-axios.defaults.baseURL = API_URL;
+// const API_URL = 'http://localhost:3000/api';
+// axios.defaults.baseURL = API_URL;
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -32,7 +30,7 @@ export const AuthProvider = ({ children }) => {
 
   const fetchUser = async () => {
     try {
-      const response = await axios.get('auth/me');
+      const response = await axios.get('/api/auth/me');
       setUser(response.data);
     } catch (error) {
       localStorage.removeItem('token');
@@ -44,7 +42,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const response = await axios.post('auth/login', { email, password });
+      const response = await axios.post('/api/auth/login', { email, password });
       const { token, ...userData } = response.data;
       
       localStorage.setItem('token', token);
@@ -62,7 +60,7 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (name, email, password) => {
     try {
-      const response = await axios.post('auth/register', { name, email, password });
+      const response = await axios.post('/api/auth/register', { name, email, password });
       const { token, ...userData } = response.data;
       
       localStorage.setItem('token', token);

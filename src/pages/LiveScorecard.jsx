@@ -23,6 +23,7 @@ const LiveScorecard = () => {
   const [score, setScore] = useState({ runs: 0, wickets: 0, overs: 0, balls: 0 });
   const [extras, setExtras] = useState({ wides: 0, noBalls: 0, byes: 0, legByes: 0 });
   const [ballHistory, setBallHistory] = useState([]);
+  const [scores, setScores] = useState([]);
   const [socket, setSocket] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('live'); // live, scorecard, commentary
@@ -36,42 +37,83 @@ const LiveScorecard = () => {
     };
   }, [matchId]);
 
-  const setupSocket = () => {
-    const newSocket = io();
-    setSocket(newSocket);
-
-    newSocket.emit('join-match', matchId);
-
-    newSocket.on('score-update', (data) => {
+  // Listen for real-time updates
+  useEffect(() => {
+    if (!socket) return;
+    socket.on('score-update', (data) => {
       setScore(data.score);
       setBallHistory(data.ballHistory);
     });
-
-    newSocket.on('match-status', (status) => {
+    socket.on('match-status', (status) => {
       setMatchStatus(status);
     });
+    return () => {
+      socket.off('score-update');
+      socket.off('match-status');
+    };
+  }, [socket]);
+
+  const setupSocket = () => {
+    const newSocket = io('http://localhost:5000');
+    setSocket(newSocket);
+
+    newSocket.on('connect', () => {
+      console.log('Connected to socket server');
+      newSocket.emit('join-match', matchId);
+    });
+
+    newSocket.on('score-updated', (data) => {
+      console.log('Score updated via socket:', data);
+      // Refresh scores data
+      fetchMatchData();
+    });
+
+    newSocket.on('match-completed', (data) => {
+      setMatchStatus('completed');
+      setMatch(data);
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
   };
 
   const fetchMatchData = async () => {
     try {
       setLoading(true);
-      const matchRes = await axios.get(`matches/${matchId}`);
-      const { match: matchData, scores } = matchRes.data;
+      
+      // Fetch match data
+      const matchRes = await axios.get(`/api/matches/${matchId}`);
+      const { match: matchData } = matchRes.data;
       setMatch(matchData);
       setBallHistory(matchData.ballHistory || []);
+      
+      // Fetch scores data separately
+      const scoresRes = await axios.get(`/api/scores/match/${matchId}`);
+      const scoresData = scoresRes.data;
+      setScores(scoresData || []);
+      
+      console.log('LiveScorecard - Fetched scores data:', {
+        scoresCount: scoresData.length,
+        scores: scoresData.map(s => ({
+          innings: s.innings,
+          allBatsmen: s.allBatsmen?.length || 0,
+          allBowlers: s.allBowlers?.length || 0
+        }))
+      });
 
       // Fetch team data
       const [team1Res, team2Res] = await Promise.all([
-        axios.get(`teams/${matchData.teamA}`),
-        axios.get(`teams/${matchData.teamB}`)
+        axios.get(`/api/teams/${matchData.teamA}`),
+        axios.get(`/api/teams/${matchData.teamB}`)
       ]);
 
       setTeams({ team1: team1Res.data, team2: team2Res.data });
 
       // Fetch players for both teams
       const [team1Players, team2Players] = await Promise.all([
-        axios.get(`players/team/${matchData.teamA}`),
-        axios.get(`players/team/${matchData.teamB}`)
+        axios.get(`/api/players/team/${matchData.teamA}`),
+        axios.get(`/api/players/team/${matchData.teamB}`)
       ]);
 
       setPlayers({ team1: team1Players.data, team2: team2Players.data });
@@ -116,28 +158,87 @@ const LiveScorecard = () => {
   };
 
   const getBattingStats = () => {
-    // This would be calculated from ball history in a real implementation
-    return players.team1.map(player => ({
-      ...player,
-      runs: Math.floor(Math.random() * 50),
-      balls: Math.floor(Math.random() * 30) + 10,
-      fours: Math.floor(Math.random() * 5),
-      sixes: Math.floor(Math.random() * 2),
-      strikeRate: Math.floor(Math.random() * 100) + 50,
-      status: Math.random() > 0.7 ? 'not out' : 'out'
-    }));
+    console.log('getBattingStats - Current state:', {
+      scoresLength: scores.length,
+      scores: scores.map(s => ({ innings: s.innings, allBatsmen: s.allBatsmen?.length || 0 }))
+    });
+    
+    // Use backend data if available, otherwise fall back to ball history calculation
+    if (scores.length > 0) {
+      const currentScore = scores.find(s => s.innings === 1) || scores[0];
+      console.log('getBattingStats - Found score:', {
+        innings: currentScore?.innings,
+        allBatsmen: currentScore?.allBatsmen?.length || 0,
+        allBatsmenData: currentScore?.allBatsmen?.map(b => ({ name: b.player?.name, runs: b.runs, balls: b.balls }))
+      });
+      
+      if (currentScore && currentScore.allBatsmen) {
+        return currentScore.allBatsmen.map(batsman => ({
+          ...batsman,
+          name: batsman.player?.name || 'Unknown',
+          role: batsman.player?.role || 'batsman',
+          strikeRate: batsman.balls > 0 ? ((batsman.runs / batsman.balls) * 100).toFixed(2) : '0.00'
+        }));
+      }
+    }
+    
+    console.log('getBattingStats - Falling back to ball history calculation');
+    // Fallback to ball history calculation
+    if (!players.team1.length && !players.team2.length) return [];
+    const batsmen = {};
+    ballHistory.forEach(ball => {
+      const name = ball.striker;
+      if (!batsmen[name]) batsmen[name] = { name, runs: 0, balls: 0, fours: 0, sixes: 0 };
+      if (!ball.extras || ball.extras.type === 'byes' || ball.extras.type === 'legByes') {
+        batsmen[name].balls += 1;
+      }
+      batsmen[name].runs += ball.runs;
+      if (ball.runs === 4) batsmen[name].fours += 1;
+      if (ball.runs === 6) batsmen[name].sixes += 1;
+    });
+    return Object.values(batsmen);
   };
 
   const getBowlingStats = () => {
-    // This would be calculated from ball history in a real implementation
-    return players.team2.map(player => ({
-      ...player,
-      overs: Math.floor(Math.random() * 4) + 1,
-      maidens: Math.floor(Math.random() * 2),
-      runs: Math.floor(Math.random() * 30) + 10,
-      wickets: Math.floor(Math.random() * 3),
-      economy: (Math.random() * 8 + 4).toFixed(2)
-    }));
+    console.log('getBowlingStats - Current state:', {
+      scoresLength: scores.length,
+      scores: scores.map(s => ({ innings: s.innings, allBowlers: s.allBowlers?.length || 0 }))
+    });
+    
+    // Use backend data if available, otherwise fall back to ball history calculation
+    if (scores.length > 0) {
+      const currentScore = scores.find(s => s.innings === 1) || scores[0];
+      console.log('getBowlingStats - Found score:', {
+        innings: currentScore?.innings,
+        allBowlers: currentScore?.allBowlers?.length || 0,
+        allBowlersData: currentScore?.allBowlers?.map(b => ({ name: b.player?.name, wickets: b.wickets, runs: b.runs }))
+      });
+      
+      if (currentScore && currentScore.allBowlers) {
+        return currentScore.allBowlers.map(bowler => ({
+          ...bowler,
+          name: bowler.player?.name || 'Unknown',
+          role: bowler.player?.role || 'bowler',
+          economy: bowler.overs > 0 ? (bowler.runs / bowler.overs).toFixed(2) : '0.00'
+        }));
+      }
+    }
+    
+    console.log('getBowlingStats - Falling back to ball history calculation');
+    // Fallback to ball history calculation
+    if (!players.team1.length && !players.team2.length) return [];
+    const bowlers = {};
+    ballHistory.forEach(ball => {
+      const name = ball.bowler;
+      if (!bowlers[name]) bowlers[name] = { name, balls: 0, overs: 0, runs: 0, wickets: 0 };
+      if (!ball.extras || ball.extras.type === 'byes' || ball.extras.type === 'legByes') {
+        bowlers[name].balls += 1;
+        if (bowlers[name].balls % 6 === 0) bowlers[name].overs += 1;
+      }
+      bowlers[name].runs += (ball.runs || 0) + (ball.extras?.runs || 0);
+      if (ball.wicket) bowlers[name].wickets += 1;
+    });
+    return Object.values(bowlers);
   };
 
   if (loading) {
@@ -233,6 +334,100 @@ const LiveScorecard = () => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Target and Result */}
+      {matchStatus === 'live' && match.target && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <div className="bg-yellow-50 rounded-lg p-4 text-center text-lg font-semibold text-yellow-800">
+            Target: {match.target} runs in {match.overs} overs
+          </div>
+        </div>
+      )}
+      {matchStatus === 'completed' && match.result && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
+          <div className="bg-green-50 rounded-lg p-4 text-center text-lg font-semibold text-green-800">
+            {teams.team1 && teams.team2 && (
+              <>
+                {match.result.winner === teams.team1._id ? teams.team1.name : teams.team2.name} won!<br/>
+                {match.result.margin}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Total Score Display */}
+      {(matchStatus === 'live' || matchStatus === 'completed') && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-xl font-bold text-gray-900 mb-4 text-center">Match Summary</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Team 1 */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h4 className="text-lg font-semibold text-blue-800 mb-3 text-center">{teams.team1?.name}</h4>
+                <div className="space-y-2">
+                  {scores.filter(s => s.battingTeam === teams.team1?._id).map((score, index) => (
+                    <div key={index} className="text-center">
+                      <div className="text-2xl font-bold text-blue-900">
+                        {score.runs}/{score.wickets}
+                      </div>
+                      <div className="text-sm text-blue-700">
+                        {formatOvers(score.overs, score.balls)} overs
+                      </div>
+                      <div className="text-xs text-blue-600">
+                        {index === 0 ? '1st Innings' : '2nd Innings'}
+                      </div>
+                    </div>
+                  ))}
+                  {scores.filter(s => s.battingTeam === teams.team1?._id).length === 0 && (
+                    <div className="text-center text-gray-500">
+                      Yet to bat
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Team 2 */}
+              <div className="bg-green-50 rounded-lg p-4">
+                <h4 className="text-lg font-semibold text-green-800 mb-3 text-center">{teams.team2?.name}</h4>
+                <div className="space-y-2">
+                  {scores.filter(s => s.battingTeam === teams.team2?._id).map((score, index) => (
+                    <div key={index} className="text-center">
+                      <div className="text-2xl font-bold text-green-900">
+                        {score.runs}/{score.wickets}
+                      </div>
+                      <div className="text-sm text-green-700">
+                        {formatOvers(score.overs, score.balls)} overs
+                      </div>
+                      <div className="text-xs text-green-600">
+                        {index === 0 ? '1st Innings' : '2nd Innings'}
+                      </div>
+                    </div>
+                  ))}
+                  {scores.filter(s => s.battingTeam === teams.team2?._id).length === 0 && (
+                    <div className="text-center text-gray-500">
+                      Yet to bat
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Target for 2nd innings */}
+            {matchStatus === 'live' && match.target && (
+              <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+                <div className="text-lg font-semibold text-yellow-800">
+                  Target: {match.target} runs in {match.overs} overs
+                </div>
+                <div className="text-sm text-yellow-700 mt-1">
+                  {score.runs >= match.target ? 'Target Achieved!' : 
+                   `Need ${match.target - score.runs} more runs from ${match.overs - score.overs - (score.balls / 6)} overs`}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

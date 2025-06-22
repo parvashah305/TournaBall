@@ -27,10 +27,11 @@ const Dashboard = () => {
     try {
       setLoading(true);
       const [tournamentsRes] = await Promise.all([
-        axios.get('/tournaments')
+        axios.get('/api/tournaments')
       ]);
       
-      const userTournaments = tournamentsRes.data.filter(t => t.organizer._id === user._id);
+      const tournamentsData = Array.isArray(tournamentsRes.data) ? tournamentsRes.data : [];
+      const userTournaments = tournamentsData.filter(t => t.organizer?._id === user._id);
       setTournaments(userTournaments);
       
       setStats({
@@ -40,6 +41,8 @@ const Dashboard = () => {
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
+      setTournaments([]);
+      setStats({ tournaments: 0, matches: 0, teams: 0 });
     } finally {
       setLoading(false);
     }
@@ -48,7 +51,7 @@ const Dashboard = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('/tournaments', formData);
+      await axios.post('/api/tournaments', formData);
       setShowCreateModal(false);
       setFormData({
         name: '',
@@ -67,7 +70,7 @@ const Dashboard = () => {
   const deleteTournament = async (id) => {
     if (window.confirm('Are you sure you want to delete this tournament?')) {
       try {
-        await axios.delete(`/tournaments/${id}`);
+        await axios.delete(`/api/tournaments/${id}`);
         fetchDashboardData();
       } catch (error) {
         console.error('Error deleting tournament:', error);

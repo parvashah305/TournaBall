@@ -40,7 +40,7 @@ const MatchDetail = () => {
   const fetchMatchData = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`/matches/${id}`);
+      const response = await axios.get(`/api/matches/${id}`);
       setMatchData(response.data);
     } catch (error) {
       console.error('Error fetching match data:', error);

@@ -19,7 +19,7 @@ const Home = () => {
   const fetchStats = async () => {
     try {
       const [tournamentsRes] = await Promise.all([
-        axios.get('/tournaments')
+        axios.get('/api/tournaments')
       ]);
       
       setStats({
@@ -34,10 +34,10 @@ const Home = () => {
 
   const fetchRecentTournaments = async () => {
     try {
-      const response = await axios.get('/tournaments?limit=3');
-      setRecentTournaments(response.data.slice(0, 3));
+      const response = await axios.get('/api/tournaments?limit=3');
+      setRecentTournaments(Array.isArray(response.data) ? response.data : response.data.tournaments || []);
     } catch (error) {
-      console.error('Error fetching tournaments:', error);
+      setRecentTournaments([]);
     }
   };
 
@@ -103,7 +103,7 @@ const Home = () => {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {recentTournaments.map((tournament) => (
+            {Array.isArray(recentTournaments) && recentTournaments.map((tournament) => (
               <div key={tournament._id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">

@@ -28,7 +28,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id)
-      .populate('organizer', 'name email');
+      .populate('organizer', '_id name email');
     
     if (!tournament) {
       return res.status(404).json({ message: 'Tournament not found' });

@@ -39,7 +39,8 @@ const TournamentDetail = () => {
     teamA: '',
     teamB: '',
     dateTime: '',
-    venue: ''
+    venue: '',
+    overs: 20
   });
 
   useEffect(() => {
@@ -50,9 +51,9 @@ const TournamentDetail = () => {
     try {
       setLoading(true);
       const [tournamentRes, teamsRes, matchesRes] = await Promise.all([
-        axios.get(`tournaments/${id}`),
-        axios.get(`teams/tournament/${id}`),
-        axios.get(`matches/tournament/${id}`)
+        axios.get(`/api/tournaments/${id}`),
+        axios.get(`/api/teams/tournament/${id}`),
+        axios.get(`/api/matches/tournament/${id}`)
       ]);
 
       setTournament(tournamentRes.data);
@@ -69,7 +70,7 @@ const TournamentDetail = () => {
   const handleAddTeam = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post('teams', {
+      const response = await axios.post('/api/teams', {
         name: teamForm.name,
         captain: teamForm.captain,
         coach: teamForm.coach,
@@ -87,7 +88,7 @@ const TournamentDetail = () => {
   const handleAddPlayer = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post('players', {
+      const response = await axios.post('/api/players', {
         name: playerForm.name,
         team: selectedTeam._id,
         role: playerForm.role,
@@ -116,15 +117,16 @@ const TournamentDetail = () => {
   const handleCreateMatch = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post('matches', {
+      const response = await axios.post('/api/matches', {
         tournament: id,
         teamA: matchForm.teamA,
         teamB: matchForm.teamB,
         dateTime: matchForm.dateTime,
-        venue: matchForm.venue
+        venue: matchForm.venue,
+        overs: matchForm.overs
       });
       setShowCreateMatchModal(false);
-      setMatchForm({ teamA: '', teamB: '', dateTime: '', venue: '' });
+      setMatchForm({ teamA: '', teamB: '', dateTime: '', venue: '', overs: 20 });
       fetchTournamentData();
     } catch (error) {
       console.error('Error creating match:', error);
@@ -653,6 +655,17 @@ const TournamentDetail = () => {
                   value={matchForm.venue}
                   onChange={(e) => setMatchForm({...matchForm, venue: e.target.value})}
                   className="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Overs</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={matchForm.overs}
+                  onChange={e => setMatchForm({ ...matchForm, overs: Number(e.target.value) })}
+                  className="w-full p-2 border border-gray-300 rounded-md focus:ring-green-500 focus:border-green-500"
+                  required
                 />
               </div>
               <div className="flex space-x-4 pt-4">

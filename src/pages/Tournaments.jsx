@@ -16,10 +16,11 @@ const Tournaments = () => {
     try {
       setLoading(true);
       const params = filter !== 'all' ? { status: filter } : {};
-      const response = await axios.get('/tournaments', { params });
-      setTournaments(response.data);
+      const response = await axios.get('/api/tournaments', { params });
+      setTournaments(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error fetching tournaments:', error);
+      setTournaments([]);
     } finally {
       setLoading(false);
     }
