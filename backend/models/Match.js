@@ -59,7 +59,7 @@ const matchSchema = new mongoose.Schema({
     type: Number,
     default: 20
   },
-  // Live scoring fields
+ 
   score: {
     runs: { type: Number, default: 0 },
     wickets: { type: Number, default: 0 },

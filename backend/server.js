@@ -6,8 +6,6 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-// Import routes
 import authRoutes from './routes/auth.js';
 import tournamentRoutes from './routes/tournaments.js';
 import teamRoutes from './routes/teams.js';
@@ -15,11 +13,9 @@ import playerRoutes from './routes/players.js';
 import matchRoutes from './routes/matches.js';
 import scoreRoutes from './routes/scores.js';
 
-// Get current directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from backend/.env
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
@@ -31,12 +27,11 @@ const io = new Server(server, {
   }
 });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// MongoDB connection with error handling
+
 const connectDB = async () => {
   try {
     const mongoURI = process.env.MONGO_URI || 'mongodb://localhost:27017/cricket-tournament';
@@ -45,19 +40,18 @@ const connectDB = async () => {
     console.log('Using MongoDB URI:', mongoURI.includes('mongodb+srv') ? 'Atlas (Cloud)' : 'Local');
     
     await mongoose.connect(mongoURI, {
-      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      serverSelectionTimeoutMS: 5000, 
     });
     console.log('Connected to MongoDB');
   } catch (error) {
     console.warn('MongoDB connection failed:', error.message);
     console.log('Running in development mode without database');
     
-    // Set a flag to indicate we're running without DB
+   
     app.set('dbConnected', false);
   }
 };
 
-// Connect to database
 connectDB();
 
 mongoose.connection.on('connected', () => {
@@ -75,7 +69,6 @@ mongoose.connection.on('disconnected', () => {
   app.set('dbConnected', false);
 });
 
-// Socket.io connection handling
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -101,16 +94,13 @@ io.on('connection', (socket) => {
   });
 });
 
-// Make io accessible to routes
 app.set('io', io);
 
-// Middleware to check database connection
 app.use((req, res, next) => {
   req.dbConnected = app.get('dbConnected') !== false;
   next();
 });
 
-// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/teams', teamRoutes);
@@ -118,7 +108,6 @@ app.use('/api/players', playerRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/scores', scoreRoutes);
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     message: 'Server is running!',

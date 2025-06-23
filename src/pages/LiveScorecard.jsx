@@ -241,6 +241,29 @@ const LiveScorecard = () => {
     return Object.values(bowlers);
   };
 
+  // Helper to get current batsmen from the latest score object
+  const getCurrentBatsmen = () => {
+    if (scores.length > 0) {
+      // Find the latest score (current innings)
+      const currentScore = scores.reduce((prev, curr) => (curr.innings > prev.innings ? curr : prev), scores[0]);
+      if (currentScore && currentScore.currentBatsmen) {
+        // Map player IDs to player objects for name/role
+        return currentScore.currentBatsmen.map(batsman => {
+          const playerObj = [...players.team1, ...players.team2].find(
+            p => p._id === (batsman.player?._id || batsman.player)
+          );
+          return {
+            ...batsman,
+            name: playerObj?.name || 'Unknown',
+            role: playerObj?.role || 'batsman',
+            strikeRate: batsman.balls > 0 ? ((batsman.runs / batsman.balls) * 100).toFixed(2) : '0.00'
+          };
+        });
+      }
+    }
+    return [];
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -487,8 +510,8 @@ const LiveScorecard = () => {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Current Batsmen</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {getBattingStats().slice(0, 2).map((player, index) => (
-                      <div key={player._id} className="bg-gray-50 rounded-lg p-4">
+                    {getCurrentBatsmen().map((player, index) => (
+                      <div key={player._id || index} className="bg-gray-50 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center space-x-2">
                             <span className="text-lg">{getPlayerRoleIcon(player.role)}</span>

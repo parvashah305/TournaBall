@@ -4,7 +4,6 @@ import { protect, admin } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all tournaments
 router.get('/', async (req, res) => {
   try {
     const { status } = req.query;
@@ -24,7 +23,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get single tournament
 router.get('/:id', async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id)
@@ -40,7 +38,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create tournament
 router.post('/', protect, async (req, res) => {
   try {
     const tournament = new Tournament({
@@ -57,7 +54,6 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// Update tournament
 router.put('/:id', protect, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -66,7 +62,6 @@ router.put('/:id', protect, async (req, res) => {
       return res.status(404).json({ message: 'Tournament not found' });
     }
     
-    // Check if user is organizer or admin
     if (tournament.organizer.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized to update this tournament' });
     }
@@ -83,7 +78,7 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
-// Delete tournament
+
 router.delete('/:id', protect, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -92,7 +87,7 @@ router.delete('/:id', protect, async (req, res) => {
       return res.status(404).json({ message: 'Tournament not found' });
     }
     
-    // Check if user is organizer or admin
+   
     if (tournament.organizer.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Not authorized to delete this tournament' });
     }

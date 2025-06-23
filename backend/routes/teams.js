@@ -4,7 +4,6 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get teams by tournament
 router.get('/tournament/:tournamentId', async (req, res) => {
   try {
     const teams = await Team.find({ tournament: req.params.tournamentId })
@@ -15,7 +14,6 @@ router.get('/tournament/:tournamentId', async (req, res) => {
   }
 });
 
-// Get single team
 router.get('/:id', async (req, res) => {
   try {
     const team = await Team.findById(req.params.id)
@@ -31,7 +29,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create team
 router.post('/', protect, async (req, res) => {
   try {
     const team = new Team(req.body);
@@ -44,7 +41,6 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// Update team
 router.put('/:id', protect, async (req, res) => {
   try {
     const updatedTeam = await Team.findByIdAndUpdate(
@@ -63,7 +59,6 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
-// Delete team
 router.delete('/:id', protect, async (req, res) => {
   try {
     const team = await Team.findByIdAndDelete(req.params.id);

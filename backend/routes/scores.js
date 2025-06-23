@@ -5,7 +5,6 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get score for a match
 router.get('/match/:matchId', async (req, res) => {
   try {
     console.log('GET /api/scores/match/:matchId - Fetching scores for match:', req.params.matchId);
@@ -36,7 +35,7 @@ router.get('/match/:matchId', async (req, res) => {
   }
 });
 
-// Create or update score
+
 router.post('/', protect, async (req, res) => {
   try {
     const io = req.app.get('io');
@@ -55,10 +54,10 @@ router.post('/', protect, async (req, res) => {
     
     if (score) {
       console.log('Updating existing score for innings:', innings);
-      // Update existing score
+      
       Object.assign(score, scoreData);
       
-      // Update allBatsmen array if currentBatsmen is provided
+      
       if (scoreData.currentBatsmen) {
         console.log('Updating allBatsmen with:', scoreData.currentBatsmen);
         scoreData.currentBatsmen.forEach(currentBatsman => {
@@ -67,7 +66,7 @@ router.post('/', protect, async (req, res) => {
           );
           
           if (existingIndex >= 0) {
-            // Accumulate stats
+            
             const existing = score.allBatsmen[existingIndex];
             score.allBatsmen[existingIndex] = {
               ...existing,
@@ -80,7 +79,7 @@ router.post('/', protect, async (req, res) => {
             };
             console.log('Updated existing batsman:', currentBatsman.player);
           } else {
-            // Add new batsman
+            
             score.allBatsmen.push({
               ...currentBatsman,
               isOut: false
@@ -90,7 +89,6 @@ router.post('/', protect, async (req, res) => {
         });
       }
       
-      // Update allBowlers array if currentBowler is provided
       if (scoreData.currentBowler) {
         console.log('Updating allBowlers with:', scoreData.currentBowler);
         const existingIndex = score.allBowlers.findIndex(
@@ -98,7 +96,7 @@ router.post('/', protect, async (req, res) => {
         );
         
         if (existingIndex >= 0) {
-          // Accumulate stats
+          
           const existing = score.allBowlers[existingIndex];
           score.allBowlers[existingIndex] = {
             ...existing,
@@ -110,7 +108,7 @@ router.post('/', protect, async (req, res) => {
           };
           console.log('Updated existing bowler:', scoreData.currentBowler.player);
         } else {
-          // Add new bowler
+        
           score.allBowlers.push(scoreData.currentBowler);
           console.log('Added new bowler:', scoreData.currentBowler.player);
         }
@@ -120,14 +118,14 @@ router.post('/', protect, async (req, res) => {
       console.log('Score saved successfully. allBatsmen count:', score.allBatsmen.length);
     } else {
       console.log('Creating new score for innings:', innings);
-      // Create new score
+      
       score = new Score({
         match: matchId,
         innings,
         ...scoreData
       });
       
-      // Initialize allBatsmen and allBowlers from current ones
+   
       if (scoreData.currentBatsmen) {
         score.allBatsmen = scoreData.currentBatsmen.map(batsman => ({
           ...batsman,
@@ -158,7 +156,7 @@ router.post('/', protect, async (req, res) => {
       allBowlers: score.allBowlers.map(b => ({ name: b.player?.name, wickets: b.wickets, runs: b.runs }))
     });
 
-    // Emit real-time update
+    
     io.to(`match-${matchId}`).emit('score-updated', score);
     
     res.json(score);
@@ -168,7 +166,7 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// Add ball to score
+
 router.post('/ball', protect, async (req, res) => {
   try {
     const io = req.app.get('io');
@@ -180,16 +178,16 @@ router.post('/ball', protect, async (req, res) => {
       return res.status(404).json({ message: 'Score not found' });
     }
 
-    // Add ball to ball-by-ball record
+   
     score.ballByBall.push(ballData);
     
-    // Update totals based on ball data
+
     score.runs += ballData.runs || 0;
     if (ballData.wicket) {
       score.wickets += 1;
     }
     
-    // Update balls and overs
+  
     score.balls += 1;
     if (score.balls % 6 === 0) {
       score.overs += 1;
@@ -206,7 +204,7 @@ router.post('/ball', protect, async (req, res) => {
       { path: 'allBowlers.player', select: 'name jerseyNumber role' }
     ]);
 
-    // Emit real-time update
+  
     io.to(`match-${matchId}`).emit('score-updated', score);
     
     res.json(score);
@@ -215,7 +213,6 @@ router.post('/ball', protect, async (req, res) => {
   }
 });
 
-// Update wicket (mark batsman as out)
 router.post('/wicket', protect, async (req, res) => {
   try {
     const io = req.app.get('io');
@@ -227,7 +224,7 @@ router.post('/wicket', protect, async (req, res) => {
       return res.status(404).json({ message: 'Score not found' });
     }
 
-    // Find and update the batsman in allBatsmen array
+    
     const batsmanIndex = score.allBatsmen.findIndex(
       batsman => batsman.player.toString() === batsmanId
     );
@@ -247,7 +244,7 @@ router.post('/wicket', protect, async (req, res) => {
       { path: 'allBowlers.player', select: 'name jerseyNumber role' }
     ]);
 
-    // Emit real-time update
+   
     io.to(`match-${matchId}`).emit('score-updated', score);
     
     res.json(score);

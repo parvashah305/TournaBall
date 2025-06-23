@@ -5,7 +5,6 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get matches by tournament
 router.get('/tournament/:tournamentId', async (req, res) => {
   try {
     const matches = await Match.find({ tournament: req.params.tournamentId })
@@ -19,7 +18,6 @@ router.get('/tournament/:tournamentId', async (req, res) => {
   }
 });
 
-// Get single match with scores
 router.get('/:id', async (req, res) => {
   try {
     const match = await Match.findById(req.params.id)
@@ -46,7 +44,6 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Create match
 router.post('/', protect, async (req, res) => {
   try {
     const match = new Match(req.body);
@@ -63,7 +60,6 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// Update match
 router.put('/:id', protect, async (req, res) => {
   try {
     const updatedMatch = await Match.findByIdAndUpdate(
@@ -89,32 +85,27 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
-// Update match for live scoring (PATCH)
 router.patch('/:id', protect, async (req, res) => {
   try {
     const updateData = {};
     
-    // Update status if provided
+    
     if (req.body.status) {
       updateData.status = req.body.status;
     }
-    
-    // Update score if provided
+ 
     if (req.body.score) {
       updateData.score = req.body.score;
     }
-    
-    // Update extras if provided
+
     if (req.body.extras) {
       updateData.extras = req.body.extras;
     }
-    
-    // Update ball history if provided
+   
     if (req.body.ballHistory) {
       updateData.ballHistory = req.body.ballHistory;
     }
     
-    // Update target if provided
     if (req.body.target) {
       updateData.target = req.body.target;
     }
@@ -139,7 +130,6 @@ router.patch('/:id', protect, async (req, res) => {
   }
 });
 
-// Delete match
 router.delete('/:id', protect, async (req, res) => {
   try {
     const match = await Match.findByIdAndDelete(req.params.id);
@@ -147,8 +137,7 @@ router.delete('/:id', protect, async (req, res) => {
     if (!match) {
       return res.status(404).json({ message: 'Match not found' });
     }
-    
-    // Also delete associated scores
+   
     await Score.deleteMany({ match: req.params.id });
     
     res.json({ message: 'Match deleted successfully' });
